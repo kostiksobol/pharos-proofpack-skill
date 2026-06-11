@@ -52,3 +52,22 @@ It is not:
 - a transaction
 - a wallet authorization
 - a guarantee that future state will remain the same
+
+## Compact RPC Proofs
+
+By default, the Skill does not include full raw `eth_getProof` payloads because they can be extremely large.
+
+Instead, proofpack evidence includes compact proof summaries:
+
+- `rawIncluded: false`
+- `rawHash`
+- account proof node count
+- account proof hash
+- storage proof count
+- storage proof hashes
+
+To include the full raw RPC proof, run commands with:
+
+    --include-raw-proof
+
+Use raw proof mode only when the user explicitly needs full proof material.

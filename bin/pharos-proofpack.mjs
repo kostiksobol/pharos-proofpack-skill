@@ -201,6 +201,54 @@ function canonicalHash(value) {
   return `sha256:${sha256Hex(canonical)}`;
 }
 
+function compactRpcProof(rawProof) {
+  if (!rawProof) return null;
+
+  const stableJson = JSON.stringify(sortForCanonicalJson(rawProof));
+  const accountProof = Array.isArray(rawProof.accountProof) ? rawProof.accountProof : [];
+  const storageProof = Array.isArray(rawProof.storageProof) ? rawProof.storageProof : [];
+
+  const storageProofSummary = storageProof.map((item) => {
+    const proof = Array.isArray(item.proof) ? item.proof : [];
+    const siblingLeftmostLeafProofs = Array.isArray(item.siblingLeftmostLeafProofs)
+      ? item.siblingLeftmostLeafProofs
+      : [];
+
+    return {
+      key: item.key ?? null,
+      value: item.value ?? null,
+      isExist: typeof item.isExist === "boolean" ? item.isExist : null,
+      proofNodeCount: proof.length,
+      proofHash: `sha256:${sha256Hex(JSON.stringify(sortForCanonicalJson(proof)))}`,
+      siblingLeftmostLeafProofCount: siblingLeftmostLeafProofs.length,
+      siblingLeftmostLeafProofHash: `sha256:${sha256Hex(JSON.stringify(sortForCanonicalJson(siblingLeftmostLeafProofs)))}`
+    };
+  });
+
+  return {
+    rawIncluded: false,
+    rawHash: `sha256:${sha256Hex(stableJson)}`,
+    address: rawProof.address ?? null,
+    balance: rawProof.balance ?? null,
+    nonce: rawProof.nonce ?? null,
+    codeHash: rawProof.codeHash ?? null,
+    storageHash: rawProof.storageHash ?? null,
+    isExist: typeof rawProof.isExist === "boolean" ? rawProof.isExist : null,
+    accountProofNodeCount: accountProof.length,
+    accountProofHash: `sha256:${sha256Hex(JSON.stringify(sortForCanonicalJson(accountProof)))}`,
+    storageProofCount: storageProof.length,
+    storageProof: storageProofSummary
+  };
+}
+
+function maybeCompactProof(rawProof, args) {
+  if (args["include-raw-proof"]) {
+    return rawProof;
+  }
+
+  return compactRpcProof(rawProof);
+}
+
 function basePack({ network, command, claim, evidence, conclusion }) {
   const pack = {
     proofpackVersion: "0.1.0",
@@ -353,7 +401,7 @@ async function commandProveContract(args) {
       code,
       codeHash: `sha256:${sha256Hex(code)}`,
       bytecodeSizeBytes,
-      accountProof,
+      accountProof: maybeCompactProof(accountProof, args),
       accountProofError
     },
     conclusion: {
@@ -408,7 +456,7 @@ async function commandProveAccount(args) {
       nonceDecimal: nonce.toString(),
       code,
       codeHash: `sha256:${sha256Hex(code)}`,
-      accountProof,
+      accountProof: maybeCompactProof(accountProof, args),
       accountProofError
     },
     conclusion: {
@@ -451,7 +499,7 @@ async function commandProveStorage(args) {
       block: blockTag,
       value,
       valueHash: `sha256:${sha256Hex(value)}`,
-      accountProof,
+      accountProof: maybeCompactProof(accountProof, args),
       accountProofError
     },
     conclusion: {
@@ -510,6 +558,10 @@ async function commandProveCall(args) {
     },
     conclusion: {
       verified: true,
+      targetCodeExists: code !== "0x",
+      warnings: code === "0x"
+        ? ["Target address has no bytecode; this proves an eth_call result, not a contract interaction."]
+        : [],
       summary: `eth_call returned ${result.length >= 18 ? `${result.slice(0, 18)}...` : result}.`
     }
   });
@@ -600,7 +652,8 @@ function help() {
       "--network": "atlantic-testnet | atlantic | mainnet",
       "--rpc-url": "optional RPC override",
       "--block": "latest | decimal block | hex block",
-      "--out": "optional output file path"
+      "--out": "optional output file path",
+      "--include-raw-proof": "include full raw eth_getProof response instead of compact proof hashes"
     }
   };
 }
