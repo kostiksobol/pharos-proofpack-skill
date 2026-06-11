@@ -71,6 +71,7 @@ When the user specifies `mainnet`, read the corresponding entry from `assets/net
 | Prove storage slot value | Storage proof | `prove-storage` | `references/workflow.md#prove-storage` |
 | Prove eth_call result | Call result proof | `prove-call` | `references/workflow.md#prove-call` |
 | Verify existing proofpack | Integrity verification | `verify-pack` | `references/workflow.md#verify-proofpack` |
+| Verify Skill installation | Self test | `self-test` | `references/workflow.md#self-test` |
 
 ## Command Templates
 
@@ -115,6 +116,11 @@ When the user specifies `mainnet`, read the corresponding entry from `assets/net
 
     node bin/pharos-proofpack.mjs verify-pack \
       --file <proofpack-json-file>
+
+### Run self-test
+
+    node bin/pharos-proofpack.mjs self-test \
+      --network atlantic-testnet
 
 ## General Error Handling
 

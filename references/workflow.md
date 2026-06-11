@@ -133,3 +133,28 @@ Verification checks:
 - required fields exist
 - transaction conclusion matches receipt status
 - contract conclusion matches bytecode presence
+
+## Self Test
+
+Use when the user or judge wants to verify that the Skill works from a clean checkout.
+
+Command:
+
+    node bin/pharos-proofpack.mjs self-test \
+      --network atlantic-testnet
+
+The self-test runs:
+
+- chain identity proof
+- valid proofpack verification
+- tamper detection
+- missing transaction proof
+- zero address contract negative proof
+- zero address storage proof
+- zero address call proof
+
+Expected result:
+
+    "ok": true
+
+The tamper detection test intentionally modifies a generated proofpack and expects `verify-pack` to return `ok: false`.

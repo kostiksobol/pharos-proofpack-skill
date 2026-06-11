@@ -71,3 +71,11 @@ To include the full raw RPC proof, run commands with:
     --include-raw-proof
 
 Use raw proof mode only when the user explicitly needs full proof material.
+
+## JSON Schema
+
+The formal proofpack schema is stored at:
+
+    assets/proofpack.schema.json
+
+`verify-pack` loads this schema and checks required top-level fields before running claim-specific consistency checks.

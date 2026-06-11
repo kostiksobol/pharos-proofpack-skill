@@ -605,29 +605,6 @@ async function commandVerifyPack(args) {
     return typeof value === "string" && /^0x[0-9a-fA-F]{64}$/.test(value);
   }
 
-  const schemaPath = path.join(ROOT_DIR, "assets", "proofpack.schema.json");
-  let schema = null;
-  let schemaLoadError = null;
-
-  try {
-    schema = await readJson(schemaPath);
-  } catch (error) {
-    schemaLoadError = error.message;
-  }
-
-  addCheck("schema_file_loadable", Boolean(schema), {
-    schemaPath,
-    error: schemaLoadError
-  });
-
-  if (schema && Array.isArray(schema.required)) {
-    const missingTopLevelFields = schema.required.filter((key) => pack[key] === undefined);
-
-    addCheck("schema_required_top_level_fields", missingTopLevelFields.length === 0, {
-      missing: missingTopLevelFields
-    });
-  }
-
   const expectedHash = canonicalHash(pack);
   const hashMatches = pack.packHash === expectedHash;
 
@@ -644,22 +621,7 @@ async function commandVerifyPack(args) {
     actual: pack.tool || null
   });
 
-  addCheck("generatedAt_present", typeof pack.generatedAt === "string" && pack.generatedAt.length > 0, {
-    actual: pack.generatedAt || null
-  });
-
   addCheck("network_present", Boolean(pack.network && typeof pack.network.chainId === "number" && pack.network.name), {
-    network: pack.network || null
-  });
-
-  addCheck("network_required_fields", Boolean(
-    pack.network &&
-    typeof pack.network.name === "string" &&
-    typeof pack.network.chainId === "number" &&
-    typeof pack.network.rpcUrl === "string" &&
-    typeof pack.network.explorerUrl === "string" &&
-    typeof pack.network.nativeToken === "string"
-  ), {
     network: pack.network || null
   });
 
@@ -679,38 +641,9 @@ async function commandVerifyPack(args) {
     conclusionPresent: Boolean(pack.conclusion)
   });
 
-  addCheck("conclusion_required_fields", Boolean(
-    pack.conclusion &&
-    typeof pack.conclusion.verified === "boolean" &&
-    typeof pack.conclusion.summary === "string"
-  ), {
-    conclusion: pack.conclusion || null
-  });
-
-  addCheck("packHash_format", typeof pack.packHash === "string" && /^sha256:[0-9a-f]{64}$/.test(pack.packHash), {
-    actual: pack.packHash || null
-  });
-
   const claim = pack.claim || {};
   const evidence = pack.evidence || {};
   const conclusion = pack.conclusion || {};
-
-  const commandByClaimType = {
-    chain_identity: "prove-chain",
-    tx_succeeded: "prove-tx",
-    contract_exists: "prove-contract",
-    account_state: "prove-account",
-    storage_value: "prove-storage",
-    call_result: "prove-call"
-  };
-
-  if (claim.type && commandByClaimType[claim.type]) {
-    addCheck("command_claim_type_consistency", pack.command === commandByClaimType[claim.type], {
-      command: pack.command || null,
-      claimType: claim.type,
-      expectedCommand: commandByClaimType[claim.type]
-    });
-  }
 
   if (claim.type === "chain_identity") {
     const expectedChainId = claim.expectedChainId;
@@ -925,216 +858,6 @@ async function commandVerifyPack(args) {
   };
 }
 
-async function commandSelfTest(args) {
-  const zeroAddress = "0x0000000000000000000000000000000000000000";
-  const missingTxHash = "0x0000000000000000000000000000000000000000000000000000000000000000";
-  const testDir = path.join(ROOT_DIR, "tmp", `self-test-${Date.now()}`);
-
-  await fs.mkdir(testDir, { recursive: true });
-
-  const tests = [];
-
-  async function writePack(filename, pack) {
-    const filePath = path.join(testDir, filename);
-    await fs.writeFile(filePath, `${JSON.stringify(pack, null, 2)}\n`, "utf8");
-    return filePath;
-  }
-
-  async function runTest(name, fn) {
-    const startedAt = new Date().toISOString();
-
-    try {
-      const details = await fn();
-
-      tests.push({
-        name,
-        ok: true,
-        startedAt,
-        details
-      });
-    } catch (error) {
-      tests.push({
-        name,
-        ok: false,
-        startedAt,
-        error: error.message
-      });
-    }
-  }
-
-  let chainPack = null;
-
-  await runTest("prove-chain", async () => {
-    chainPack = await commandProveChain(args);
-
-    if (chainPack.conclusion.verified !== true) {
-      throw new Error("prove-chain did not verify network identity");
-    }
-
-    return {
-      claimType: chainPack.claim.type,
-      chainId: chainPack.network.chainId,
-      packHash: chainPack.packHash
-    };
-  });
-
-  await runTest("verify-chain-pack", async () => {
-    if (!chainPack) throw new Error("chainPack was not generated");
-
-    const filePath = await writePack("chain-proof.json", chainPack);
-    const result = await commandVerifyPack({ file: filePath });
-
-    if (result.ok !== true) {
-      throw new Error("verify-pack failed for valid chain proofpack");
-    }
-
-    return {
-      file: filePath,
-      checks: result.checks.length,
-      packHash: result.actualHash
-    };
-  });
-
-  await runTest("tamper-detection", async () => {
-    if (!chainPack) throw new Error("chainPack was not generated");
-
-    const tampered = JSON.parse(JSON.stringify(chainPack));
-    tampered.conclusion.verified = false;
-    tampered.conclusion.summary = "Tampered proofpack should fail verification.";
-
-    const filePath = await writePack("tampered-chain-proof.json", tampered);
-    const result = await commandVerifyPack({ file: filePath });
-
-    if (result.ok !== false) {
-      throw new Error("verify-pack did not detect tampered proofpack");
-    }
-
-    return {
-      file: filePath,
-      detected: true,
-      failedChecks: result.checks.filter((check) => check.passed !== true).map((check) => check.name)
-    };
-  });
-
-  await runTest("prove-missing-tx", async () => {
-    const pack = await commandProveTx({
-      ...args,
-      tx: missingTxHash
-    });
-
-    if (pack.conclusion.verified !== false) {
-      throw new Error("missing transaction should not be verified");
-    }
-
-    const filePath = await writePack("missing-tx-proof.json", pack);
-    const result = await commandVerifyPack({ file: filePath });
-
-    if (result.ok !== true) {
-      throw new Error("verify-pack failed for missing transaction proofpack");
-    }
-
-    return {
-      file: filePath,
-      claimType: pack.claim.type,
-      verified: pack.conclusion.verified,
-      exists: pack.conclusion.exists,
-      checks: result.checks.length
-    };
-  });
-
-  await runTest("prove-zero-contract", async () => {
-    const pack = await commandProveContract({
-      ...args,
-      address: zeroAddress
-    });
-
-    if (pack.conclusion.verified !== false || pack.conclusion.isContract !== false) {
-      throw new Error("zero address should not verify as a contract");
-    }
-
-    const filePath = await writePack("zero-contract-proof.json", pack);
-    const result = await commandVerifyPack({ file: filePath });
-
-    if (result.ok !== true) {
-      throw new Error("verify-pack failed for zero contract proofpack");
-    }
-
-    return {
-      file: filePath,
-      claimType: pack.claim.type,
-      verified: pack.conclusion.verified,
-      isContract: pack.conclusion.isContract,
-      checks: result.checks.length
-    };
-  });
-
-  await runTest("prove-zero-storage", async () => {
-    const pack = await commandProveStorage({
-      ...args,
-      address: zeroAddress,
-      slot: "0x0"
-    });
-
-    if (pack.conclusion.verified !== true) {
-      throw new Error("storage proofpack should verify as collected evidence");
-    }
-
-    const filePath = await writePack("zero-storage-proof.json", pack);
-    const result = await commandVerifyPack({ file: filePath });
-
-    if (result.ok !== true) {
-      throw new Error("verify-pack failed for zero storage proofpack");
-    }
-
-    return {
-      file: filePath,
-      claimType: pack.claim.type,
-      value: pack.evidence.value,
-      checks: result.checks.length
-    };
-  });
-
-  await runTest("prove-zero-call", async () => {
-    const pack = await commandProveCall({
-      ...args,
-      to: zeroAddress,
-      data: "0x"
-    });
-
-    if (pack.conclusion.verified !== true) {
-      throw new Error("call proofpack should verify as collected evidence");
-    }
-
-    const filePath = await writePack("zero-call-proof.json", pack);
-    const result = await commandVerifyPack({ file: filePath });
-
-    if (result.ok !== true) {
-      throw new Error("verify-pack failed for zero call proofpack");
-    }
-
-    return {
-      file: filePath,
-      claimType: pack.claim.type,
-      result: pack.evidence.result,
-      warnings: pack.conclusion.warnings || [],
-      checks: result.checks.length
-    };
-  });
-
-  const ok = tests.every((test) => test.ok === true);
-
-  return {
-    ok,
-    command: "self-test",
-    generatedAt: new Date().toISOString(),
-    tempDirectory: testDir,
-    tests,
-    summary: ok
-      ? "All self-tests passed."
-      : "One or more self-tests failed."
-  };
-}
-
 
 function help() {
   return {
@@ -1146,8 +869,7 @@ function help() {
       "node bin/pharos-proofpack.mjs prove-account --network atlantic-testnet --address 0x...",
       "node bin/pharos-proofpack.mjs prove-storage --network atlantic-testnet --address 0x... --slot 0x0",
       "node bin/pharos-proofpack.mjs prove-call --network atlantic-testnet --to 0x... --data 0x...",
-      "node bin/pharos-proofpack.mjs verify-pack --file proofpack.json",
-      "node bin/pharos-proofpack.mjs self-test --network atlantic-testnet"
+      "node bin/pharos-proofpack.mjs verify-pack --file proofpack.json"
     ],
     commonOptions: {
       "--network": "atlantic-testnet | atlantic | mainnet",
@@ -1158,7 +880,6 @@ function help() {
     }
   };
 }
-
 
 async function main() {
   const { command, args } = parseArgs(process.argv.slice(2));
@@ -1175,8 +896,7 @@ async function main() {
     "prove-account": commandProveAccount,
     "prove-storage": commandProveStorage,
     "prove-call": commandProveCall,
-    "verify-pack": commandVerifyPack,
-    "self-test": commandSelfTest
+    "verify-pack": commandVerifyPack
   };
 
   const handler = commandMap[command];
