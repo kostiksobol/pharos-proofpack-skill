@@ -571,280 +571,59 @@ async function commandVerifyPack(args) {
   const file = requireArg(args, "file");
   const pack = await readJson(path.resolve(file));
 
-  const checks = [];
-
-  function addCheck(name, passed, extra = {}) {
-    checks.push({
-      name,
-      passed: passed === true,
-      ...extra
-    });
-  }
-
-  function sameHex(a, b) {
-    return typeof a === "string" &&
-      typeof b === "string" &&
-      a.toLowerCase() === b.toLowerCase();
-  }
-
-  function hashString(value) {
-    if (typeof value !== "string") return null;
-    return `sha256:${sha256Hex(value)}`;
-  }
-
-  function safeHexToDecimalString(hex) {
-    try {
-      if (typeof hex !== "string") return null;
-      return hexToBigInt(hex).toString();
-    } catch {
-      return null;
-    }
-  }
-
-  function isStorageWord(value) {
-    return typeof value === "string" && /^0x[0-9a-fA-F]{64}$/.test(value);
-  }
-
   const expectedHash = canonicalHash(pack);
   const hashMatches = pack.packHash === expectedHash;
 
-  addCheck("packHash", hashMatches, {
-    expected: expectedHash,
-    actual: pack.packHash || null
-  });
-
-  addCheck("proofpackVersion_present", typeof pack.proofpackVersion === "string" && pack.proofpackVersion.length > 0, {
-    actual: pack.proofpackVersion || null
-  });
-
-  addCheck("tool_present", pack.tool === "pharos-proofpack-skill", {
-    actual: pack.tool || null
-  });
-
-  addCheck("network_present", Boolean(pack.network && typeof pack.network.chainId === "number" && pack.network.name), {
-    network: pack.network || null
-  });
-
-  addCheck("command_present", typeof pack.command === "string" && pack.command.length > 0, {
-    command: pack.command || null
-  });
-
-  addCheck("claim_present", Boolean(pack.claim && typeof pack.claim.type === "string"), {
-    claimType: pack.claim?.type || null
-  });
-
-  addCheck("evidence_present", Boolean(pack.evidence && typeof pack.evidence === "object"), {
-    evidencePresent: Boolean(pack.evidence)
-  });
-
-  addCheck("conclusion_present", Boolean(pack.conclusion && typeof pack.conclusion === "object"), {
-    conclusionPresent: Boolean(pack.conclusion)
-  });
-
-  const claim = pack.claim || {};
-  const evidence = pack.evidence || {};
-  const conclusion = pack.conclusion || {};
-
-  if (claim.type === "chain_identity") {
-    const expectedChainId = claim.expectedChainId;
-    const observedChainId = evidence.rpcChainIdDecimal;
-    const fieldsPresent = typeof expectedChainId === "number" && typeof observedChainId === "number";
-    const shouldBeVerified = fieldsPresent && observedChainId === expectedChainId;
-
-    addCheck("chain_identity_consistency", fieldsPresent && conclusion.verified === shouldBeVerified, {
-      expectedChainId,
-      observedChainId,
-      conclusionVerified: conclusion.verified
-    });
-
-    addCheck("chain_block_number_present", typeof evidence.latestBlockNumberDecimal === "string" && typeof evidence.latestBlockNumberHex === "string", {
-      latestBlockNumberHex: evidence.latestBlockNumberHex || null,
-      latestBlockNumberDecimal: evidence.latestBlockNumberDecimal || null
-    });
-  }
-
-  if (claim.type === "tx_succeeded") {
-    const tx = evidence.transaction || null;
-    const receipt = evidence.receipt || null;
-    const status = receipt ? receipt.status : null;
-    const shouldBeVerified = status === "0x1";
-
-    addCheck("tx_hash_consistency", tx === null || sameHex(tx.hash, claim.txHash), {
-      claimTxHash: claim.txHash || null,
-      evidenceTxHash: tx ? tx.hash : null
-    });
-
-    addCheck("tx_receipt_hash_consistency", receipt === null || sameHex(receipt.transactionHash, claim.txHash), {
-      claimTxHash: claim.txHash || null,
-      receiptTxHash: receipt ? receipt.transactionHash : null
-    });
-
-    addCheck("tx_succeeded_consistency", conclusion.verified === shouldBeVerified, {
-      receiptStatus: status,
-      conclusionVerified: conclusion.verified
-    });
-
-    addCheck("tx_mined_consistency", conclusion.mined === Boolean(receipt), {
-      receiptPresent: Boolean(receipt),
-      conclusionMined: conclusion.mined
-    });
-
-    addCheck("tx_exists_consistency", conclusion.exists === Boolean(tx), {
-      transactionPresent: Boolean(tx),
-      conclusionExists: conclusion.exists
-    });
-  }
-
-  if (claim.type === "contract_exists") {
-    const code = evidence.code;
-    const hasCode = typeof code === "string" && code !== "0x";
-    const expectedBytecodeSize = hasCode ? (code.length - 2) / 2 : 0;
-
-    addCheck("contract_address_consistency", sameHex(claim.address, evidence.address), {
-      claimAddress: claim.address || null,
-      evidenceAddress: evidence.address || null
-    });
-
-    addCheck("contract_code_hash_consistency", typeof code === "string" && evidence.codeHash === hashString(code), {
-      expectedCodeHash: typeof code === "string" ? hashString(code) : null,
-      actualCodeHash: evidence.codeHash || null
-    });
-
-    addCheck("contract_bytecode_size_consistency", evidence.bytecodeSizeBytes === expectedBytecodeSize, {
-      expectedBytecodeSize,
-      actualBytecodeSize: evidence.bytecodeSizeBytes
-    });
-
-    addCheck("contract_exists_consistency", conclusion.verified === hasCode && conclusion.isContract === hasCode, {
-      hasCode,
-      conclusionVerified: conclusion.verified,
-      conclusionIsContract: conclusion.isContract
-    });
-  }
-
-  if (claim.type === "account_state") {
-    const code = evidence.code;
-    const hasCode = typeof code === "string" && code !== "0x";
-
-    addCheck("account_address_consistency", sameHex(claim.address, evidence.address), {
-      claimAddress: claim.address || null,
-      evidenceAddress: evidence.address || null
-    });
-
-    addCheck("account_balance_consistency", safeHexToDecimalString(evidence.balanceHex) === evidence.balanceWei, {
-      balanceHex: evidence.balanceHex || null,
-      expectedBalanceWei: safeHexToDecimalString(evidence.balanceHex),
-      actualBalanceWei: evidence.balanceWei || null
-    });
-
-    addCheck("account_nonce_consistency", safeHexToDecimalString(evidence.nonceHex) === evidence.nonceDecimal, {
-      nonceHex: evidence.nonceHex || null,
-      expectedNonceDecimal: safeHexToDecimalString(evidence.nonceHex),
-      actualNonceDecimal: evidence.nonceDecimal || null
-    });
-
-    addCheck("account_code_hash_consistency", typeof code === "string" && evidence.codeHash === hashString(code), {
-      expectedCodeHash: typeof code === "string" ? hashString(code) : null,
-      actualCodeHash: evidence.codeHash || null
-    });
-
-    addCheck("account_contract_flag_consistency", conclusion.isContract === hasCode, {
-      hasCode,
-      conclusionIsContract: conclusion.isContract
-    });
-
-    addCheck("account_state_verified_consistency", conclusion.verified === true, {
-      conclusionVerified: conclusion.verified
-    });
-  }
-
-  if (claim.type === "storage_value") {
-    addCheck("storage_address_consistency", sameHex(claim.address, evidence.address), {
-      claimAddress: claim.address || null,
-      evidenceAddress: evidence.address || null
-    });
-
-    addCheck("storage_slot_consistency", sameHex(claim.slot, evidence.slot), {
-      claimSlot: claim.slot || null,
-      evidenceSlot: evidence.slot || null
-    });
-
-    addCheck("storage_value_format", isStorageWord(evidence.value), {
-      value: evidence.value || null
-    });
-
-    addCheck("storage_value_hash_consistency", evidence.valueHash === hashString(evidence.value), {
-      expectedValueHash: hashString(evidence.value),
-      actualValueHash: evidence.valueHash || null
-    });
-
-    const compactProof = evidence.accountProof || null;
-    const firstStorageProof = compactProof &&
-      Array.isArray(compactProof.storageProof) &&
-      compactProof.storageProof.length > 0
-        ? compactProof.storageProof[0]
-        : null;
-
-    addCheck("storage_compact_proof_shape", compactProof === null || typeof compactProof.rawIncluded === "boolean", {
-      rawIncluded: compactProof ? compactProof.rawIncluded : null,
-      storageProofCount: compactProof ? compactProof.storageProofCount : null
-    });
-
-    if (firstStorageProof) {
-      addCheck("storage_proof_key_consistency", sameHex(firstStorageProof.key, evidence.slot), {
-        proofKey: firstStorageProof.key || null,
-        evidenceSlot: evidence.slot || null
-      });
+  const checks = [
+    {
+      name: "packHash",
+      passed: hashMatches,
+      expected: expectedHash,
+      actual: pack.packHash || null
     }
+  ];
 
-    addCheck("storage_value_verified_consistency", conclusion.verified === true, {
-      conclusionVerified: conclusion.verified
+  if (!pack.proofpackVersion) {
+    checks.push({ name: "proofpackVersion", passed: false, reason: "Missing proofpackVersion" });
+  }
+
+  if (!pack.network || typeof pack.network.chainId !== "number") {
+    checks.push({ name: "network", passed: false, reason: "Missing network.chainId" });
+  }
+
+  if (!pack.claim || !pack.claim.type) {
+    checks.push({ name: "claim", passed: false, reason: "Missing claim.type" });
+  }
+
+  if (!pack.evidence) {
+    checks.push({ name: "evidence", passed: false, reason: "Missing evidence" });
+  }
+
+  if (!pack.conclusion) {
+    checks.push({ name: "conclusion", passed: false, reason: "Missing conclusion" });
+  }
+
+  if (pack.claim?.type === "tx_succeeded") {
+    const status = pack.evidence?.receipt?.status || null;
+
+    checks.push({
+      name: "tx_succeeded_consistency",
+      passed: status === "0x1" ? pack.conclusion?.verified === true : pack.conclusion?.verified === false,
+      receiptStatus: status,
+      conclusionVerified: pack.conclusion?.verified
     });
   }
 
-  if (claim.type === "call_result") {
-    addCheck("call_target_consistency", sameHex(claim.to, evidence.call?.to), {
-      claimTo: claim.to || null,
-      evidenceTo: evidence.call?.to || null
-    });
+  if (pack.claim?.type === "contract_exists") {
+    const code = pack.evidence?.code;
 
-    addCheck("call_data_consistency", sameHex(claim.data, evidence.call?.data), {
-      claimData: claim.data || null,
-      evidenceData: evidence.call?.data || null
-    });
-
-    addCheck("call_result_hash_consistency", evidence.resultHash === hashString(evidence.result), {
-      expectedResultHash: hashString(evidence.result),
-      actualResultHash: evidence.resultHash || null
-    });
-
-    addCheck("call_target_code_flag_consistency", conclusion.targetCodeExists === undefined || conclusion.targetCodeExists === evidence.targetCodeExists, {
-      evidenceTargetCodeExists: evidence.targetCodeExists,
-      conclusionTargetCodeExists: conclusion.targetCodeExists
-    });
-
-    addCheck("call_warning_consistency", evidence.targetCodeExists === true || Array.isArray(conclusion.warnings), {
-      targetCodeExists: evidence.targetCodeExists,
-      warnings: conclusion.warnings || []
-    });
-
-    addCheck("call_result_verified_consistency", conclusion.verified === true, {
-      conclusionVerified: conclusion.verified
+    checks.push({
+      name: "contract_exists_consistency",
+      passed: code && code !== "0x" ? pack.conclusion?.verified === true : pack.conclusion?.verified === false,
+      hasCode: Boolean(code && code !== "0x"),
+      conclusionVerified: pack.conclusion?.verified
     });
   }
-
-  const supportedClaimTypes = new Set([
-    "chain_identity",
-    "tx_succeeded",
-    "contract_exists",
-    "account_state",
-    "storage_value",
-    "call_result"
-  ]);
-
-  addCheck("claim_type_supported_by_verify_pack", supportedClaimTypes.has(claim.type), {
-    claimType: claim.type || null
-  });
 
   const ok = checks.every((check) => check.passed === true);
 
@@ -853,11 +632,9 @@ async function commandVerifyPack(args) {
     file,
     expectedHash,
     actualHash: pack.packHash || null,
-    claimType: claim.type || null,
     checks
   };
 }
-
 
 function help() {
   return {
