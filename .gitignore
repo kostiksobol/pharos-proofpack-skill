@@ -12,3 +12,6 @@ proofpacks/*.json
 *.bak
 *.bak2
 *.backup
+
+# Self-test temporary files
+tmp/
