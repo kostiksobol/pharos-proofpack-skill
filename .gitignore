@@ -1,0 +1,9 @@
+.env
+.env.*
+.DS_Store
+*.log
+node_modules/
+tmp/
+dist/
+coverage/
+proofpacks/*.json
